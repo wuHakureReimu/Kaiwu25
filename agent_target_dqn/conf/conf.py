@@ -16,10 +16,10 @@ class Config:
     # features
     # 特征
     FEATURES = [
-        2,
-        6,
-        6,
-        8,
+        2,             # cur pos norm
+        6,             # end pos feature
+        6,             # history pos (-10) feature
+        16,            # legal actions 8 + 8
     ]
 
     FEATURE_SPLIT_SHAPE = FEATURES
