@@ -1,0 +1,39 @@
+[dqn]
+actor_model = "agent_dqn.agent.Agent"
+learner_model = "agent_dqn.agent.Agent"
+aisrv_model = "agent_dqn.agent.Agent"
+trainer = "kaiwudrl.server.learner.standard_trainer.StandardTrainer"
+predictor = "kaiwudrl.server.actor.standard_predictor.StandardPredictor"
+train_workflow = "agent_dqn.workflow.train_workflow.workflow"
+eval_workflow = "tools.eval.workflow.eval_workflow.workflow"
+exam_workflow = "tools.eval.workflow.exam_workflow.workflow"
+
+[target_dqn]
+actor_model = "agent_target_dqn.agent.Agent"
+learner_model = "agent_target_dqn.agent.Agent"
+aisrv_model = "agent_target_dqn.agent.Agent"
+trainer = "kaiwudrl.server.learner.standard_trainer.StandardTrainer"
+predictor = "kaiwudrl.server.actor.standard_predictor.StandardPredictor"
+train_workflow = "agent_target_dqn.workflow.train_workflow.workflow"
+eval_workflow = "tools.eval.workflow.eval_workflow.workflow"
+exam_workflow = "tools.eval.workflow.exam_workflow.workflow"
+
+[ppo]
+actor_model = "agent_ppo.agent.Agent"
+learner_model = "agent_ppo.agent.Agent"
+aisrv_model = "agent_ppo.agent.Agent"
+trainer = "kaiwudrl.server.learner.standard_trainer.StandardTrainer"
+predictor = "kaiwudrl.server.actor.standard_predictor.StandardPredictor"
+train_workflow = "agent_ppo.workflow.train_workflow.workflow"
+eval_workflow = "tools.eval.workflow.eval_workflow.workflow"
+exam_workflow = "tools.eval.workflow.exam_workflow.workflow"
+
+[diy]
+actor_model = "agent_diy.agent.Agent"
+learner_model = "agent_diy.agent.Agent"
+aisrv_model = "agent_diy.agent.Agent"
+trainer = "kaiwudrl.server.learner.standard_trainer.StandardTrainer"
+predictor = "kaiwudrl.server.actor.standard_predictor.StandardPredictor"
+train_workflow = "agent_diy.workflow.train_workflow.workflow"
+eval_workflow = "tools.eval.workflow.eval_workflow.workflow"
+exam_workflow = "tools.eval.workflow.exam_workflow.workflow"

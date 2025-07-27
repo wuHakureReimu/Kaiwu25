@@ -1,0 +1,109 @@
+# Environment Configuration Master Table
+# 环境配置主表
+[env_conf]
+
+# The map name cannot be modified, please use the default name
+# 地图名称不可修改，请使用默认名称
+map_name = "map_cherry"
+
+# ------------------------
+# Cherry Map Configurations
+# ------------------------
+[env_conf.map_cherry]
+# Starting point, only valid when start_random=false.
+# Array, containing two elements, x and y coordinates, ranging from 0 to 127.
+# 起点位置，仅在start_random=false时生效。
+# 数组，包含两个元素，分别为xy坐标，取值范围为0~127。
+start = [111, 83]
+
+# The end position only valid when end_random=false and cannot be the same as the start position.
+# Array, containing two elements, x and y coordinates, ranging from 0 to 127.
+# 终点位置，仅在end_random=false时生效，不能与起点位置重复。
+# 数组，包含两个元素，分别为xy坐标，取值范围为0~127。
+end = [20, 49]
+
+# Acceleration buff position, only valid when buff_random=false, cannot be repeated with the starting position and the end position.
+# Array, containing two elements, xy coordinates, ranging from 0 to 127.
+# 加速增益位置，仅在buff_random=false时生效，不能与起点位置和终点位置重复。
+# 数组，包含两个元素，分别为xy坐标，取值范围为0~127。
+buff = [57, 68]
+
+# Whether the starting point is random.
+# Boolean value, true means a random starting point, false means using the start field to generate a fixed starting point position.
+# 起点是否随机。
+# 布尔值，true表示随机起点，false表示使用start字段生成固定起点位置。
+start_random = true
+
+# Whether the end point is random.
+# Boolean value, true means a random end point, false means using the end field to generate a fixed end point position.
+# 终点是否随机。
+# 布尔值，true表示随机终点，false表示使用end字段生成固定终点位置。
+end_random = true
+
+# Whether the acceleration buff is random.
+# Boolean value, true indicates a random acceleration gain position, false indicates using the buff field to generate a fixed acceleration gain position.
+# 加速增益是否随机。
+# 布尔值，true表示随机加速增益位置，false表示使用buff字段生成固定加速增益位置。
+buff_random = false
+
+# The number of cooling steps for the acceleration buff.
+# The acceleration gain will enter a cooling state after being collected and will be reactivated after the cooling state ends.
+# Integer, the value range is 1~2000.
+# 加速增益冷却步数，加速增益在被收集后会进入冷却状态，冷却状态结束后重新激活。
+# 整型，取值范围为1~2000。
+buff_cooldown = 100
+
+# The number of talent cooldown steps.
+# After being cast, the talent will enter a cooldown state and will be reactivated after the cooldown state ends.
+# Integer, the value range is 100~2000.
+# 技能冷却步数，技能在被施放后会进入冷却状态，冷却状态结束后重新激活。
+# 整型，取值范围为100~2000。
+talent_cooldown = 100
+
+# Whether the treasure chest list is random, Boolean value, false - fixed treasure chest list, true - random treasure chest list.
+# If fixed is turned on, treasure_pos is used to generate a fixed treasure chest list.
+# If random is turned on, treasure_count is used to randomly generate a treasure chest list.
+# 宝箱是否随机, 布尔值，false - 固定宝箱，true - 随机宝箱。
+# 若开启固定，则使用treasure_pos生成固定宝箱。
+# 若开启随机，则使用treasure_count随机生成宝箱。
+treasure_random = false
+
+# The number of treasure chests when generating random treasure chest list. This is only valid when treasure_random = true.
+# Integer, the value range is 0~13.
+# 生成随机宝箱时的宝箱数量，仅在treasure_random = true时生效。
+# 整型，取值范围为0~13。
+treasure_count = 8
+
+# The location of the treasure chests when generating a fixed treasure chest list. This is only valid when treasure_random = false.
+# A two-dimensional array containing 0 to 13 elements, each element is an array, which are x and y coordinates, ranging from 0 to 127
+# Element does not support repeated values.
+# 生成固定宝箱时的宝箱位置，仅在treasure_random = false时生效。
+# 二维数组，包含0~13个元素，每个元素为一个数组，分别为xy坐标，取值范围为0~127。
+# 元素不支持重复值
+treasure_pos = []
+
+# Whether to generate random dynamic obstacle list.
+# Boolean value, false means fixed dynamic obstacle list, true means randomly generating a dynamic obstacle.
+# 是否生成随机动态障碍物。
+# 布尔值，false表示固定动态障碍物，true表示随机生成一个动态障碍物。
+obstacle_random = false
+
+# The id when generating a fixed dynamic obstacle list. It only works when obstacle_random = false.
+# An array containing 0 to 6 elements. The value range of the element is 1 to 6.
+# Element does not support repeated values.
+# 生成固定动态障碍物时的id，仅在obstacle_random = false时生效。
+# 数组，包含0~6个元素，元素的取值范围为1~6。
+# 元素不支持重复值
+obstacle_id = []
+
+# Hero talent configuration.
+# Integer, 1 means super flash talent, other values ​​are illegal.
+# 英雄技能配置。
+# 整型，1表示超级闪现技能，其他值非法。
+talent_type = 1
+
+# Maximum number of steps in a single game.
+# Integer, range is 1~2000.
+# 单局最大步数。
+# 整型，取值范围为1~2000。
+max_step = 1000
