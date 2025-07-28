@@ -34,7 +34,13 @@ class Preprocessor:
         self.bad_move_ids = set()              # 中间变量，用来判断非法动作
         self.is_flashed = True                 # 闪现状态 True-available
 
-    def _get_pos_feature(self, found, cur_pos, target_pos):      # 输入AB坐标，生成对应向量AB的特征向量
+        # 视野域信息 ---onehot coding
+        self.treasure_flag = None
+        self.end_flag = None
+        self.obstacle_flag = None
+        self.buff_flag = None
+
+    def _get_pos_feature(self, found, cur_pos, target_pos):      # 输入AB坐标，生成对应向量AB的特征向量(tool fuction)
         relative_pos = tuple(y - x for x, y in zip(cur_pos, target_pos))  # 对应向量
         dist = np.linalg.norm(relative_pos)                               # L2范数
         target_pos_norm = norm(target_pos, 128, -128)                     # B点坐标标准化
@@ -109,6 +115,23 @@ class Preprocessor:
         # 闪现状态
         if hero['talent']['status'] == 0:
             self.is_flashed = False
+        
+        # 视野域信息维护
+        map_info = obs['map_info']
+        treasure_map = np.zeros((11, 11), dtype=np.float32)
+        end_map = np.zeros((11, 11), dtype=np.float32)
+        obstacle_map = np.zeros((11, 11), dtype=np.float32)
+        buff_map = np.zeros((11, 11), dtype=np.float32)
+        for r, row_data in enumerate(map_info):
+            for c, value in enumerate(row_data['values']):
+                if value == 0: obstacle_map[r, c] = 1
+                elif value == 4: treasure_map[r, c] = 1
+                elif value == 6: buff_map[r, c] = 1
+                elif value == 3: end_map[r, c] = 1
+        self.treasure_flag = treasure_map.flatten()
+        self.end_flag = end_map.flatten()
+        self.obstacle_flag = obstacle_map.flatten()
+        self.buff_flag = buff_map.flatten()
 
     def process(self, frame_state, last_action):          # 外层调用
         self.pb2struct(frame_state, last_action)      # 用原始观测更新属性
@@ -120,7 +143,16 @@ class Preprocessor:
         # Feature
         # ***更新后的属性在这直接打包成特征
         # 特征
-        feature = np.concatenate([self.cur_pos_norm, self.feature_end_pos, self.feature_history_pos, legal_action])
+        feature = np.concatenate([
+            self.cur_pos_norm,
+            self.feature_end_pos,
+            self.feature_history_pos,
+            legal_action,
+            self.treasure_flag,
+            self.end_flag,
+            self.obstacle_flag,
+            self.buff_flag
+            ])
 
         # 特征、合法动作、奖励函数打包返回。***奖励函数在这被调用
         return (

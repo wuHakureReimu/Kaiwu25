@@ -20,6 +20,10 @@ class Config:
         6,             # end pos feature
         6,             # history pos (-10) feature
         16,            # legal actions 8 + 8
+        121,           # 4 map info flags
+        121,
+        121,
+        121
     ]
 
     FEATURE_SPLIT_SHAPE = FEATURES
