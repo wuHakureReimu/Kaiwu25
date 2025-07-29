@@ -132,6 +132,7 @@ class Preprocessor:
         # 闪现状态
         if hero['talent']['status'] == 0:
             self.is_flashed = False
+        else: self.is_flashed = True
         
         # 视野域信息维护
         map_info = obs['map_info']
