@@ -33,20 +33,24 @@ else:
 class Model(nn.Module):
     def __init__(self, state_shape, action_shape=0, softmax=False):
         super().__init__()
-        # feature configure parameter
-        # 特征配置参数
         self.feature_len = Config.DIM_OF_OBSERVATION
 
-        # Q network
-        # Q 网络
-        self.q_mlp = MLP([self.feature_len, 256, 128, action_shape], "q_mlp")
+        # 公共特征层
+        self.feature_layer = MLP([self.feature_len, 512, 256], "feature")
 
-    # Forward inference
-    # 前向推理
+        # Value 分支
+        self.value_layer = MLP([128, 64, 1], "value")
+
+        # Advantage 分支
+        self.advantage_layer = MLP([256, 128, action_shape], "advantage")
+
     def forward(self, feature):
-        # Action and value processing
-        logits = self.q_mlp(feature)
-        return logits
+        x = self.feature_layer(feature)
+        value = self.value_layer(x)  # [batch, 1]
+        advantage = self.advantage_layer(x)  # [batch, action_shape]
+        # dueling Q 组合
+        q = value + (advantage - advantage.mean(dim=1, keepdim=True))
+        return q
 
 
 def make_fc_layer(in_features: int, out_features: int):
