@@ -39,7 +39,7 @@ class Model(nn.Module):
         self.feature_layer = MLP([self.feature_len, 512, 256], "feature")
 
         # Value 分支
-        self.value_layer = MLP([128, 64, 1], "value")
+        self.value_layer = MLP([256, 64, 1], "value")
 
         # Advantage 分支
         self.advantage_layer = MLP([256, 128, action_shape], "advantage")

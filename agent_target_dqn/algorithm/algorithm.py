@@ -71,13 +71,28 @@ class Algorithm:
         batch_feature = self.__convert_to_tensor(batch_feature_vec)
         _batch_feature = self.__convert_to_tensor(_batch_feature_vec)
 
+        # Double DQN 修改点 1: 使用当前网络选择动作
+        self.model.eval()
+        with torch.no_grad():
+            # 使用当前网络计算下一个状态的Q值
+            next_q_values = self.model(_batch_feature)
+            # 掩码非法动作
+            next_q_values = next_q_values.masked_fill(~_batch_obs_legal, float(torch.min(next_q_values)))
+            # 选择最大Q值对应的动作
+            next_actions = next_q_values.argmax(dim=1, keepdim=True)
+
+        # Double DQN 修改点 2: 使用目标网络评估动作
         model = getattr(self, "target_model")
         model.eval()
         with torch.no_grad():
+            # 使用目标网络计算下一个状态的Q值
             q = model(_batch_feature)
+            # 掩码非法动作
             q = q.masked_fill(~_batch_obs_legal, float(torch.min(q)))
-            q_max = q.max(dim=1).values.detach()
+            # 使用当前网络选择的动作索引获取目标网络的Q值
+            q_max = q.gather(1, next_actions).squeeze(1).detach()
 
+        # 目标Q值计算
         target_q = rew + self._gamma * q_max * not_done
 
         self.optim.zero_grad()
