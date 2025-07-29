@@ -22,7 +22,7 @@ ObsData = create_cls(
 )
 
 
-ActData = create_cls(
+ActData = create_cls(        # 腾子搞这个类纯属脱裤子放屁
     "ActData",
     move_dir=None,
     use_talent=None,
@@ -74,20 +74,20 @@ DirectionAngles = {
 }
 
 
-def reward_process(end_dist, history_dist):
+def reward_process(target_dist, history_dist):
     # step reward
     # 步数奖励
     step_reward = -0.001
 
-    # end reward
-    # 终点奖励
-    end_reward = -0.02 * end_dist
+    # target reward
+    # 目标点奖励
+    target_reward = -0.02 * target_dist
 
     # distance reward
     # 距离奖励
     dist_reward = min(0.001, 0.05 * history_dist)
 
-    return [step_reward + dist_reward + end_reward]
+    return [step_reward + dist_reward + target_reward]
 
 
 @attached
@@ -114,7 +114,7 @@ def SampleData2NumpyData(g_data):
 @attached
 def NumpyData2SampleData(s_data):
     obs_data_size = Config.DIM_OF_OBSERVATION
-    legal_data_size = Config.DIM_OF_ACTION_DIRECTION
+    legal_data_size = Config.DIM_OF_ACTION_DIRECTION + Config.DIM_OF_TALENT
     return SampleData(
         obs=s_data[:obs_data_size],
         _obs=s_data[obs_data_size : 2 * obs_data_size],

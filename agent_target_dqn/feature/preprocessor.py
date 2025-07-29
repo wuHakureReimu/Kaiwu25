@@ -33,6 +33,7 @@ class Preprocessor:
         self.history_pos = []                  # 存储前10步的坐标 [tuples]
         self.bad_move_ids = set()              # 中间变量，用来判断非法动作
         self.is_flashed = True                 # 闪现状态 True-available
+        self.target_pos = (0, 0)               # 目标坐标
 
         # 视野域信息 ---onehot coding
         self.treasure_flag = None
@@ -99,10 +100,26 @@ class Preprocessor:
                     self.end_pos_dir = end_pos_dir
                     self.end_pos_dis = end_pos_dis
 
+        # 选择目标位置
+        organs = obs['frame_state']['organs']
+        min_dist_sqr = (self.end_pos[0] - self.cur_pos[0])**2 + (self.end_pos[1] - self.cur_pos[1])**2       # type: ignore
+        self.target_pos = self.end_pos
+        targetIsEnd = True
+        for organ in organs:
+            subtype = organ['sub_type']
+            if organ['status'] == 1 and (subtype == 1 or subtype == 2):    # 若组件可获取且是宝箱或buff，计算L2距离的平方
+                dist_sqr = (organ['pos']['x'] - self.cur_pos[0])**2 + (organ['pos']['z'] - self.cur_pos[1])**2
+                if dist_sqr < min_dist_sqr:
+                    min_dist_sqr = dist_sqr
+                    self.target_pos = (organ['pos']['x'], organ['pos']['z'])
+                    targetIsEnd = False
+
         # 自己看
         self.last_pos_norm = self.cur_pos_norm
         self.cur_pos_norm = norm(self.cur_pos, 128, -128)
-        self.feature_end_pos = self._get_pos_feature(self.is_end_pos_found, self.cur_pos, self.end_pos)
+        self.feature_end_pos = self._get_pos_feature(self.is_end_pos_found, self.cur_pos, self.end_pos)     # 有关这部分可以进行修改优化，训练验证能跑后再进行优化
+        # 目标点的特征向量(这里用了个三元操作符，后续验证能跑会修改简洁)
+        self.feature_target_pos = self._get_pos_feature(self.is_end_pos_found if targetIsEnd else 1, self.cur_pos, self.target_pos)
 
         # History position feature
         # 历史位置特征
@@ -145,7 +162,7 @@ class Preprocessor:
         # 特征
         feature = np.concatenate([
             self.cur_pos_norm,
-            self.feature_end_pos,
+            self.feature_target_pos,              # baseline以end pos为目标，现在改成target pos
             self.feature_history_pos,
             legal_action,
             self.treasure_flag,
@@ -158,7 +175,7 @@ class Preprocessor:
         return (
             feature,
             legal_action,
-            reward_process(self.feature_end_pos[-1], self.feature_history_pos[-1]),     # 传入两个距离
+            reward_process(self.feature_target_pos[-1], self.feature_history_pos[-1]),     # 传入两个距离---奖励函数参数在这可以放心自由发挥
         )
 
     def get_legal_action(self):

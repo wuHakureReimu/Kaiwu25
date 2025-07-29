@@ -156,7 +156,7 @@ def run_episodes(n_episode, env, agent, usr_conf, logger, monitor):
                     ret=reward,
                 )
 
-                collector.append(frame)
+                collector.append(frame)       # 这是样本容器，把frame塞进去再转成sample有脱裤子放屁的嫌疑
 
                 # If the task is over, the sample is processed and sent to training
                 # 如果任务结束，则进行样本处理，将样本送去训练

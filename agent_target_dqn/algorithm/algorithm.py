@@ -20,10 +20,12 @@ from agent_target_dqn.feature.definition import ActData
 
 class Algorithm:
     def __init__(self, device, logger, monitor):
-        self.act_shape = Config.DIM_OF_ACTION_DIRECTION
+        # 维度配置
+        self.act_shape = Config.DIM_OF_ACTION_DIRECTION + Config.DIM_OF_TALENT      # 移动8维 + 闪现8维
         self.direction_space = Config.DIM_OF_ACTION_DIRECTION
         self.talent_direction = Config.DIM_OF_TALENT
         self.obs_shape = Config.DIM_OF_OBSERVATION
+
         self.epsilon_max = Config.EPSILON_MAX
         self.epsilon_min = Config.EPSILON_MIN
         self.epsilon_decay = Config.EPSILON_DECAY
