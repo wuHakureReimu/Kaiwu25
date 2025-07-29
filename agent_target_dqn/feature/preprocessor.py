@@ -158,11 +158,16 @@ class Preprocessor:
         # 合法动作
         legal_action = self.get_legal_action()        # 用更新后的属性获取合法动作
 
+        # 当前位置的One-hot编码
+        curposx_onehot, curposz_onehot = self.get_cur_pos_onehot()
+
         # Feature
         # ***更新后的属性在这直接打包成特征
         # 特征
         feature = np.concatenate([
             self.cur_pos_norm,
+            curposx_onehot,
+            curposz_onehot,
             self.feature_target_pos,              # baseline以end pos为目标，现在改成target pos
             self.feature_history_pos,
             legal_action,
@@ -209,3 +214,10 @@ class Preprocessor:
             return [self.move_usable] * self.move_action_num
 
         return legal_action
+
+    def get_cur_pos_onehot(self):
+        x = [0] * 64
+        z = [0] * 64
+        x[self.cur_pos[0]] = 1
+        z[self.cur_pos[1]] = 1
+        return(x, z)

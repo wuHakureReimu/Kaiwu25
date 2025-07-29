@@ -17,6 +17,8 @@ class Config:
     # 特征
     FEATURES = [
         2,             # cur pos norm
+        64,            # cur pos x one-hot
+        64,            # cur pos z one-hot
         6,             # target pos feature
         6,             # history pos (-10) feature
         16,            # legal actions 8 + 8

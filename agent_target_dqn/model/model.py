@@ -34,15 +34,24 @@ class Model(nn.Module):
     def __init__(self, state_shape, action_shape=0, softmax=False):
         super().__init__()
         self.feature_len = Config.DIM_OF_OBSERVATION
-
-        # 公共特征层
-        self.feature_layer = MLP([self.feature_len, 512, 256], "feature")
-
-        # Value 分支
-        self.value_layer = MLP([256, 64, 1], "value")
-
-        # Advantage 分支
-        self.advantage_layer = MLP([256, 128, action_shape], "advantage")
+        self.feature_layer = nn.Sequential(
+            make_fc_layer(self.feature_len, 256),
+            nn.ReLU(),
+            make_fc_layer(256, 256),
+            nn.ReLU(),
+            make_fc_layer(256, 128),
+            nn.ReLU()
+        )
+        self.value_layer = nn.Sequential(
+            make_fc_layer(128, 64),
+            nn.ReLU(),
+            make_fc_layer(64, 1)
+        )
+        self.advantage_layer = nn.Sequential(
+            make_fc_layer(128, 64),
+            nn.ReLU(),
+            make_fc_layer(64, action_shape)
+        )
 
     def forward(self, feature):
         x = self.feature_layer(feature)
