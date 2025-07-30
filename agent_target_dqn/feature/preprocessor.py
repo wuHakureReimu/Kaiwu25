@@ -41,6 +41,8 @@ class Preprocessor:
         self.obstacle_flag = None
         self.buff_flag = None
 
+        self.organ_status = [0] * 15           # 组件状态
+
     def _get_pos_feature(self, found, cur_pos, target_pos):      # 输入AB坐标，生成对应向量AB的特征向量(tool fuction)
         relative_pos = tuple(y - x for x, y in zip(cur_pos, target_pos))  # 对应向量
         dist = np.linalg.norm(relative_pos)                               # L2范数
@@ -114,6 +116,11 @@ class Preprocessor:
                     self.target_pos = (organ['pos']['x'], organ['pos']['z'])
                     targetIsEnd = False
 
+        # 组件状态信息
+        for organ in organs:
+            if organ['sub_type'] == 1 or organ['sub_type'] == 2: self.organ_status[organ['config_id']] = organ['status']
+            elif organ['sub_type'] == 4: self.organ_status[14] = organ['status']
+
         # 自己看
         self.last_pos_norm = self.cur_pos_norm
         self.cur_pos_norm = norm(self.cur_pos, 128, -128)
@@ -168,6 +175,7 @@ class Preprocessor:
             self.cur_pos_norm,
             curposx_onehot,
             curposz_onehot,
+            self.organ_status,
             self.feature_target_pos,              # baseline以end pos为目标，现在改成target pos
             self.feature_history_pos,
             legal_action,
