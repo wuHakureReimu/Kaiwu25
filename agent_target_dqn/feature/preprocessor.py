@@ -18,6 +18,40 @@ def norm(v, max_v, min_v=0):
     v = np.maximum(np.minimum(max_v, v), min_v)
     return (v - min_v) / (max_v - min_v)
 
+# 即时奖励涉及很多状态先后变化，写在大类里不好读，故封装到这
+class ImRewardAttr:
+    def __init__(self):
+        # 1. 宝箱拾取的即时奖励
+        self.last_treasure_collect_num = 0
+        self.treasure_collect_num = 0
+
+        # 2. buff拾取的即时奖励
+        self.last_buff_collect_num = 0
+        self.buff_collect_num = 0
+        self.buff_cnt = 0
+
+        # 3. 闪现的即时奖励
+        self.if_flash = False
+
+    def update(self, obs, last_action):
+        self.last_treasure_collect_num = self.treasure_collect_num
+        self.treasure_collect_num = obs['score_info']['treasure_collected_count']
+        self.if_collect_ts = self.treasure_collect_num - self.last_treasure_collect_num
+
+        self.last_buff_collect_num = self.buff_collect_num
+        self.buff_collect_num = obs['score_info']['buff_count']
+        self.if_collect_buff = self.buff_collect_num - self.last_buff_collect_num
+        if self.if_collect_buff:
+            self.buff_cnt += 1
+        
+        self.if_flash = last_action // 8
+    
+    def get_imReward(self):
+        treasure_reward = 5 * self.if_collect_ts
+        buff_reward = 5 * (0.5 ** self.buff_cnt) * self.if_collect_buff
+        flash_reward = -0.5 * self.if_flash
+        return treasure_reward + buff_reward + flash_reward
+
 
 class Preprocessor:
     def __init__(self) -> None:
@@ -42,6 +76,9 @@ class Preprocessor:
         self.buff_flag = None
 
         self.organ_status = [0] * 15           # 组件状态
+
+        # 即时奖励属性
+        self.imRewardAttr = ImRewardAttr()
 
     def _get_pos_feature(self, found, cur_pos, target_pos):      # 输入AB坐标，生成对应向量AB的特征向量(tool fuction)
         relative_pos = tuple(y - x for x, y in zip(cur_pos, target_pos))  # 对应向量
@@ -141,7 +178,8 @@ class Preprocessor:
             self.is_flashed = False
         else: self.is_flashed = True
         
-        # 视野域信息维护
+        # 视野域信息维护 + 找到与障碍物最短距离
+        min_obstacle_dist = 6 * 1.41
         map_info = obs['map_info']
         treasure_map = np.zeros((11, 11), dtype=np.float32)
         end_map = np.zeros((11, 11), dtype=np.float32)
@@ -149,7 +187,11 @@ class Preprocessor:
         buff_map = np.zeros((11, 11), dtype=np.float32)
         for r, row_data in enumerate(map_info):
             for c, value in enumerate(row_data['values']):
-                if value == 0: obstacle_map[r, c] = 1
+                if value == 0:
+                    obstacle_map[r, c] = 1
+                    tempdist = ((r-5)**2+(c-5)**2)**(1/2)
+                    if tempdist < min_obstacle_dist:
+                        min_obstacle_dist = tempdist
                 elif value == 4: treasure_map[r, c] = 1
                 elif value == 6: buff_map[r, c] = 1
                 elif value == 3: end_map[r, c] = 1
@@ -157,6 +199,11 @@ class Preprocessor:
         self.end_flag = end_map.flatten()
         self.obstacle_flag = obstacle_map.flatten()
         self.buff_flag = buff_map.flatten()
+        # 与障碍物的最短L2距离标准化
+        self.obstacle_dist = norm(min_obstacle_dist, 1.41 * 128)
+
+        # 即时奖励相关属性维护
+        self.imRewardAttr.update(obs, last_action)
 
     def process(self, frame_state, last_action):          # 外层调用
         self.pb2struct(frame_state, last_action)      # 用原始观测更新属性
@@ -189,7 +236,12 @@ class Preprocessor:
         return (
             feature,
             legal_action,
-            reward_process(self.feature_target_pos[-1], self.feature_history_pos[-1]),     # 传入两个距离---奖励函数参数在这可以放心自由发挥
+            reward_process(
+                self.feature_target_pos[-1],
+                self.feature_history_pos[-1],
+                self.obstacle_dist,
+                self.imRewardAttr.get_imReward()
+                ),
         )
 
     def get_legal_action(self):

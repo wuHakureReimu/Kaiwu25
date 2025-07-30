@@ -74,20 +74,23 @@ DirectionAngles = {
 }
 
 
-def reward_process(target_dist, history_dist):
+def reward_process(target_dist, history_dist, obstacle_dist, immediate_reward):
     # step reward
     # 步数奖励
-    step_reward = -0.001
+    step_reward = -0.01
 
     # target reward
     # 目标点奖励
-    target_reward = -0.02 * target_dist
+    target_reward = -0.1 * target_dist
 
     # distance reward
     # 距离奖励
-    dist_reward = min(0.001, 0.05 * history_dist)
+    dist_reward = min(0.01, 0.6 * history_dist)
 
-    return [step_reward + dist_reward + target_reward]
+    # obstacle reward
+    obstacle_reward = min(0.01, 0.6 * obstacle_dist)
+
+    return [step_reward + dist_reward + target_reward + obstacle_reward + immediate_reward]
 
 
 @attached
