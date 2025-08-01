@@ -31,14 +31,14 @@ else:
 
 
 class OutputInputAttention(nn.Module):
-    """注意力模块：Query来自输出，Key和Value来自输入，内部使用不影响外部接口"""
-    def __init__(self, input_dim, output_dim, num_heads=8, dropout=0.1):
+    def __init__(self, input_dim, output_dim, num_heads=4, dropout=0.1):      # 默认4头
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.num_heads = num_heads
         
-        assert output_dim % num_heads == 0, "输出维度必须能被注意力头数量整除"
+        # 确保头维度可整除
+        assert output_dim % num_heads == 0, f"输出维度{output_dim}必须能被注意力头数量{num_heads}整除"
         self.head_dim = output_dim // num_heads
         
         # 注意力投影层
@@ -51,19 +51,15 @@ class OutputInputAttention(nn.Module):
     def forward(self, input_features, output_features):
         batch_size = input_features.size(0)
         
-        # 增加序列维度
-        input_features = input_features.unsqueeze(1)
-        output_features = output_features.unsqueeze(1)
-        
         # 生成Q, K, V
         q = self.q_proj(output_features)
         k = self.k_proj(input_features)
         v = self.v_proj(input_features)
         
         # 拆分到多个注意力头
-        q = q.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)
+        q = q.view(batch_size, self.num_heads, self.head_dim).transpose(0, 1)
+        k = k.view(batch_size, self.num_heads, self.head_dim).transpose(0, 1)
+        v = v.view(batch_size, self.num_heads, self.head_dim).transpose(0, 1)
         
         # 计算注意力权重
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (self.head_dim ** 0.5)
@@ -74,33 +70,31 @@ class OutputInputAttention(nn.Module):
         attn_output = torch.matmul(attn_weights, v)
         
         # 拼接多头结果
-        attn_output = attn_output.transpose(1, 2).contiguous().view(
-            batch_size, 1, self.output_dim
+        attn_output = attn_output.transpose(0, 1).contiguous().view(
+            batch_size, self.output_dim
         )
         
         # 输出投影和残差连接
         output = self.out_proj(attn_output)
         output = output + output_features  # 残差连接保留原始信息
-        return output.squeeze(1)  # 仅返回处理后的输出，不暴露权重
+        return output
 
 
 class Model(nn.Module):
-    def __init__(self, state_shape, action_shape=0, softmax=False, num_heads=8):
+    def __init__(self, state_shape, action_shape=0, softmax=False, num_heads=4):
         super().__init__()
         self.feature_len = Config.DIM_OF_OBSERVATION
         self.action_shape = action_shape
         
-        # 原有特征提取层
+        # 特征提取层
         self.feature_layer = nn.Sequential(
             make_fc_layer(self.feature_len, 256),
-            nn.ReLU(),
-            make_fc_layer(256, 256),
             nn.ReLU(),
             make_fc_layer(256, 128),
             nn.ReLU()
         )
         
-        # 原有价值和优势流
+        # 价值和优势流
         self.value_layer = nn.Sequential(
             make_fc_layer(128, 64),
             nn.ReLU(),
@@ -112,27 +106,45 @@ class Model(nn.Module):
             make_fc_layer(64, action_shape)
         )
         
-        # 集成注意力模块，但不改变外部接口
-        self.attention = OutputInputAttention(
-            input_dim=self.feature_len,
-            output_dim=action_shape,
-            num_heads=num_heads
-        )
+        # 集成注意力模块
+        # 注意：输入维度是原始特征长度，输出维度是动作空间大小
+        # 如果动作空间不能被头数整除，我们使用投影层解决
+        self.attention = self._build_attention(self.feature_len, action_shape, num_heads)
+        
+    def _build_attention(self, input_dim, output_dim, num_heads):
+        # 如果输出维度不能被头数整除，添加投影层
+        if output_dim % num_heads != 0:
+            # 找到最接近的可整除维度
+            d_model = ((output_dim // num_heads) + 1) * num_heads
+            
+            # 创建带投影的注意力模块
+            return nn.Sequential(
+                nn.Linear(output_dim, d_model),
+                OutputInputAttention(
+                    input_dim=input_dim,
+                    output_dim=d_model,
+                    num_heads=num_heads
+                ),
+                nn.Linear(d_model, output_dim)
+            )
+        else:
+            return OutputInputAttention(
+                input_dim=input_dim,
+                output_dim=output_dim,
+                num_heads=num_heads
+            )
 
     def forward(self, feature):
-        # 保存原始输入用于注意力计算
-        original_feature = feature
-        
         # 原有DQN计算流程
         x = self.feature_layer(feature)
         value = self.value_layer(x)
         advantage = self.advantage_layer(x)
         q = value + (advantage - advantage.mean(dim=1, keepdim=True))
         
-        # 应用注意力机制优化Q值，但不改变输出格式
-        q_attended = self.attention(original_feature, q)
+        # 应用注意力机制优化Q值
+        q_attended = self.attention(feature, q)
         
-        # 保持原有输出格式，确保与外部框架兼容
+        # 保持原有输出格式
         return q_attended
 
 
