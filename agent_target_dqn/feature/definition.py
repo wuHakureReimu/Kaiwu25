@@ -22,7 +22,7 @@ ObsData = create_cls(
 )
 
 
-ActData = create_cls(        # 腾子搞这个类纯属脱裤子放屁
+ActData = create_cls(
     "ActData",
     move_dir=None,
     use_talent=None,
@@ -76,18 +76,15 @@ DirectionAngles = {
 
 def reward_process(target_dist, history_dist):
     # step reward
-    # 步数奖励
-    step_reward = -0.001
+    step_reward = -0.0015  #原为-0.001
 
     # target reward
-    # 目标点奖励
-    target_reward = -0.02 * target_dist
+    target_reward = -0.04 * target_dist  #原为-0.02 * target_dist
 
     # distance reward
-    # 距离奖励
-    dist_reward = min(0.001, 0.05 * history_dist)
-
-    return [step_reward + dist_reward + target_reward]
+    dist_reward = 0.2*(history_dist-3/(1.41*128))  #原为min(0.001, [0.05,0.15] * history_dist)
+    
+    return step_reward + dist_reward + target_reward
 
 
 @attached

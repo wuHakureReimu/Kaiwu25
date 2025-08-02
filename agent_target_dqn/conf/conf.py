@@ -14,21 +14,20 @@ Author: Tencent AI Arena Authors
 class Config:
 
     # features
-    # 特征
+    # 注:这里的feature维度指preprocessor的process里面的feature维度
+    
+    #蒋的特征
     FEATURES = [
         2,             # cur pos norm
-        64,            # cur pos x one-hot
-        64,            # cur pos z one-hot
-        15,            # 15 organs status
         6,             # target pos feature
         6,             # history pos (-10) feature
         16,            # legal actions 8 + 8
-        121,           # 4 map info flags
+        #121,           # 4 map info flags
+        #121,
         121,
-        121,
-        121
+        #121,
     ]
-
+    #蒋的特征
     FEATURE_SPLIT_SHAPE = FEATURES
 
     # Size of observation
@@ -56,13 +55,13 @@ class Config:
 
     # Discount factor GAMMA in RL
     # RL中的回报折扣GAMMA
-    GAMMA = 0.9
+    GAMMA = 0.985    #0.9
 
     # epsilon
-    EPSILON_MIN = 0.1
-    EPSILON_MAX = 1.0
-    EPSILON_DECAY = 1e-6
+    EPSILON_MIN = 0.15   #0.1
+    EPSILON_MAX = 0.80   #1.0
+    EPSILON_DECAY = 8e-7    #1e-6
 
     # Initial learning rate
     # 初始的学习率
-    START_LR = 1e-4
+    START_LR = 0.0003  #1e-4

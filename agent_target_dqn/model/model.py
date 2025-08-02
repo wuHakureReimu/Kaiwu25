@@ -37,8 +37,6 @@ class Model(nn.Module):
         self.feature_layer = nn.Sequential(
             make_fc_layer(self.feature_len, 256),
             nn.ReLU(),
-            make_fc_layer(256, 256),
-            nn.ReLU(),
             make_fc_layer(256, 128),
             nn.ReLU()
         )

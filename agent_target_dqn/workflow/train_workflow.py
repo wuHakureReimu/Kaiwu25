@@ -10,6 +10,7 @@ Author: Tencent AI Arena Authors
 
 import time
 import os
+import random
 from kaiwu_agent.utils.common_func import Frame, attached
 
 from tools.train_env_conf_validate import read_usr_conf
@@ -34,16 +35,40 @@ def workflow(envs, agents, logger=None, monitor=None):
         if usr_conf is None:
             logger.error(f"usr_conf is None, please check agent_target_dqn/conf/train_env_conf.toml")
             return
-
+        #注:中为自己写的
+        #pre_collector = test_collect(2000,env, agent, usr_conf, logger, monitor)
+        #pre_collector = sample_process(pre_collector)
+        #注:中为自己写的
+        ordinary_buffer=[]
+        ordinary_buffer_size=2000*180
+        success_buffer=[]
+        success_buffer_size=2000*90
         while True:
-            for g_data, monitor_data in run_episodes(episode_num_every_epoch, env, agent, usr_conf, logger, monitor):
-                agent.learn(g_data)
+            for g_data, monitor_data,is_win in run_episodes(episode_num_every_epoch, env, agent, usr_conf, logger, monitor):
+                #判断胜利机制
+                if(is_win==True):
+                    last_portion=0.5
+                    start_index=int(len(g_data)*(1-last_portion))
+                    success_buffer+=g_data[start_index:]
+                    while(len(success_buffer)>success_buffer_size):success_buffer.pop(0)
+
+                ordinary_buffer+=g_data
+                while(len(ordinary_buffer)>ordinary_buffer_size):ordinary_buffer.pop(0)
+
+                for i in range(25):  #25
+                    batch=[]
+                    if(len(ordinary_buffer)>=2000*5):batch+=random.sample(ordinary_buffer, 60)
+                    if(len(success_buffer)>=200):batch+=random.sample(success_buffer, 20)
+                    if(len(batch)>0):
+                        agent.learn(batch)
+                    else:break
+                
                 g_data.clear()
 
             # Save model file
             # 保存model文件
             now = time.time()
-            if now - last_save_model_time >= 1800:
+            if now - last_save_model_time >= 600:
                 agent.save_model()
                 last_save_model_time = now
 
@@ -56,6 +81,79 @@ def workflow(envs, agents, logger=None, monitor=None):
     except Exception as e:
         raise RuntimeError(f"workflow error")
 
+#注:中为自己写的
+def test_collect(n_time,env,agent,usr_conf,logger,monitor):
+    try:
+        pre_collector = list()
+        obs, extra_info = env.reset(usr_conf=usr_conf)
+        if extra_info["result_code"] < 0:
+            logger.error(
+                f"env.reset result_code is {extra_info['result_code']}, result_message is {extra_info['result_message']}"
+            )
+            raise RuntimeError(extra_info["result_message"])
+
+        agent.reset()
+        agent.load_model(id="latest")
+
+        obs_data, _ = agent.observation_process(obs, extra_info)
+
+        step=0
+        processrate=0
+        max_step_no = int(os.environ.get("max_step_no", "0"))
+        for i in range(n_time):
+            act_data, model_version = agent.predict(list_obs_data=[obs_data])
+            act = agent.action_process(act_data[0])
+            step_no, _obs, terminated, truncated, _extra_info = env.step(act)
+
+            #env.step()有一种机制,使得一次episode禁止走超过max step步
+            #使用env.reset()后会刷新
+            if _extra_info["result_code"] != 0:
+                logger.warning(
+                    f"_extra_info.result_code is {_extra_info['result_code']}, \
+                    _extra_info.result_message is {_extra_info['result_message']}"
+                )
+                break
+
+            # Feature processing
+            # 特征处理
+            _obs_data, reward = agent.observation_process(_obs, _extra_info)
+
+            frame = Frame(
+                obs=obs_data.feature,
+                _obs=_obs_data.feature,
+                obs_legal=obs_data.legal_act,
+                _obs_legal=_obs_data.legal_act,
+                act=act,
+                rew=reward,
+                done=False,  #暂不清楚done对于训练的影响
+                ret=reward,
+            )
+            pre_collector.append(frame)
+            
+            step+=1
+
+            if((i+1)%(n_time//10)==0):
+                processrate+=1
+                if monitor:
+                    monitor_data = {
+                        "diy_1": 0,
+                        "diy_2": processrate,
+                        "diy_3": 0,
+                        "diy_4": 0,
+                        "diy_5": 0,
+                    }
+                    monitor.put_data({os.getpid(): monitor_data})
+                    print(processrate)
+            # Status update
+            # 状态更新
+            obs_data = _obs_data
+            extra_info = _extra_info
+        return pre_collector
+
+    except Exception as e:
+        logger.error(f"pre_collect error")
+        raise RuntimeError(f"pre_collect error")
+#注:中为自己写的
 
 def run_episodes(n_episode, env, agent, usr_conf, logger, monitor):
     try:
@@ -92,18 +190,13 @@ def run_episodes(n_episode, env, agent, usr_conf, logger, monitor):
 
             done = False
             step = 0
-            diy_1 = 0
-            diy_2 = 0
-            diy_3 = 0
-            diy_4 = 0
-            diy_5 = 0
 
             max_step_no = int(os.environ.get("max_step_no", "0"))
 
             while not done:
                 # Agent performs inference, gets the predicted action for the next frame
                 # Agent 进行推理, 获取下一帧的预测动作
-                act_data, model_version = agent.predict(list_obs_data=[obs_data])
+                act_data, model_version = agent.predict(list_obs_data=[obs_data],win_rate=win_rate)
 
                 # Unpack ActData into action
                 # ActData 解包成动作
@@ -123,21 +216,19 @@ def run_episodes(n_episode, env, agent, usr_conf, logger, monitor):
 
                 # Feature processing
                 # 特征处理
-                _obs_data, reward_list = agent.observation_process(_obs, _extra_info)
-                reward = sum(reward_list)
-
+                _obs_data, reward = agent.observation_process(_obs, _extra_info)
                 # Determine task over, and update the number of victories
                 # 判断任务结束, 并更新胜利次数
                 game_info = _extra_info["game_info"]
                 if truncated:
                     win_rate = agent.update_win_rate(False)
-                    reward = -3
+                    reward = -2  #原为-3
                     logger.info(
                         f"Game truncated! step_no:{step_no} score:{game_info['total_score']} win_rate:{win_rate}"
                     )
                 elif terminated:
                     win_rate = agent.update_win_rate(True)
-                    reward = 10
+                    reward = 30  #原为10
                     logger.info(
                         f"Game terminated! step_no:{step_no} score:{game_info['total_score']} win_rate:{win_rate}"
                     )
@@ -156,23 +247,24 @@ def run_episodes(n_episode, env, agent, usr_conf, logger, monitor):
                     ret=reward,
                 )
 
-                collector.append(frame)       # 这是样本容器，把frame塞进去再转成sample有脱裤子放屁的嫌疑
-
+                collector.append(frame)
                 # If the task is over, the sample is processed and sent to training
                 # 如果任务结束，则进行样本处理，将样本送去训练
                 if done:
+                    if(terminated):diy2=1
+                    else:diy2=0
                     if monitor:
                         monitor_data = {
-                            "diy_1": win_rate,
-                            "diy_2": diy_2,
-                            "diy_3": diy_3,
-                            "diy_4": diy_4,
-                            "diy_5": diy_5,
+                            "diy_1": step,
+                            "diy_2": diy2,
+                            "diy_3": _obs['frame_state']['heroes'][0]['pos']['x'],
+                            "diy_4": _obs['frame_state']['heroes'][0]['pos']['z'],
+                            "diy_5": win_rate,
                         }
 
                     if len(collector) > 0:
                         collector = sample_process(collector)
-                        yield collector, monitor_data
+                        yield collector, monitor_data,terminated  #加了判断是否胜利
                     break
 
                 # Status update

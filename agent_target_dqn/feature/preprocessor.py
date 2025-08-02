@@ -40,8 +40,9 @@ class Preprocessor:
         self.end_flag = None
         self.obstacle_flag = None
         self.buff_flag = None
-
-        self.organ_status = [0] * 15           # 组件状态
+        #中为自己写的
+        self.last_pos=(0,0)
+        #中为自己写的
 
     def _get_pos_feature(self, found, cur_pos, target_pos):      # 输入AB坐标，生成对应向量AB的特征向量(tool fuction)
         relative_pos = tuple(y - x for x, y in zip(cur_pos, target_pos))  # 对应向量
@@ -68,6 +69,8 @@ class Preprocessor:
 
         # History position
         # 历史位置
+        if(len(self.history_pos)>=1):self.last_pos=self.history_pos[-1]
+        else:self.last_pos=self.cur_pos
         self.history_pos.append(self.cur_pos)
         if len(self.history_pos) > 10:
             self.history_pos.pop(0)
@@ -104,22 +107,19 @@ class Preprocessor:
 
         # 选择目标位置
         organs = obs['frame_state']['organs']
-        min_dist_sqr = (self.end_pos[0] - self.cur_pos[0])**2 + (self.end_pos[1] - self.cur_pos[1])**2       # type: ignore
+        end_min_dist_sqr = (self.end_pos[0] - self.cur_pos[0])**2 + (self.end_pos[1] - self.cur_pos[1])**2     
         self.target_pos = self.end_pos
         targetIsEnd = True
-        for organ in organs:
-            subtype = organ['sub_type']
-            if organ['status'] == 1 and (subtype == 1 or subtype == 2):    # 若组件可获取且是宝箱或buff，计算L2距离的平方
-                dist_sqr = (organ['pos']['x'] - self.cur_pos[0])**2 + (organ['pos']['z'] - self.cur_pos[1])**2
-                if dist_sqr < min_dist_sqr:
-                    min_dist_sqr = dist_sqr
-                    self.target_pos = (organ['pos']['x'], organ['pos']['z'])
-                    targetIsEnd = False
-
-        # 组件状态信息
-        for organ in organs:
-            if organ['sub_type'] == 1 or organ['sub_type'] == 2: self.organ_status[organ['config_id']] = organ['status']
-            elif organ['sub_type'] == 4: self.organ_status[14] = organ['status']
+        if(self.step_no<=1500): #大于1500步后,直接寻找终点(当max_step改变时需要调整)
+            min_dist_sqr=1000   #可能大于end_min_dist_sqr,但宝箱的优先级较高
+            for organ in organs:
+                subtype = organ['sub_type']
+                if organ['status'] == 1 and (subtype == 1 or subtype == 2):    # 若组件可获取且是宝箱或buff，计算L2距离的平方
+                    dist_sqr = (organ['pos']['x'] - self.cur_pos[0])**2 + (organ['pos']['z'] - self.cur_pos[1])**2
+                    if((subtype == 1 and dist_sqr < min_dist_sqr) or (subtype == 2 and dist_sqr < min_dist_sqr and dist_sqr < end_min_dist_sqr)):
+                        min_dist_sqr = dist_sqr
+                        self.target_pos = (organ['pos']['x'], organ['pos']['z'])
+                        targetIsEnd = False
 
         # 自己看
         self.last_pos_norm = self.cur_pos_norm
@@ -137,9 +137,8 @@ class Preprocessor:
         self.last_action = last_action
 
         # 闪现状态
-        if hero['talent']['status'] == 0:
-            self.is_flashed = False
-        else: self.is_flashed = True
+        if hero['talent']['status'] == 0:self.is_flashed = False
+        else:self.is_flashed = True
         
         # 视野域信息维护
         map_info = obs['map_info']
@@ -158,53 +157,60 @@ class Preprocessor:
         self.obstacle_flag = obstacle_map.flatten()
         self.buff_flag = buff_map.flatten()
 
-    def process(self, frame_state, last_action):          # 外层调用
-        self.pb2struct(frame_state, last_action)      # 用原始观测更新属性
+        return targetIsEnd
 
+    def process(self, frame_state, last_action):          # 外层调用
+        targetIsEnd=self.pb2struct(frame_state, last_action)      # 用原始观测更新属性
+        
         # Legal action
         # 合法动作
-        legal_action = self.get_legal_action()        # 用更新后的属性获取合法动作
-
-        # 当前位置的One-hot编码
-        curposx_onehot, curposz_onehot = self.get_cur_pos_onehot()
+        legal_action,forbidden_reward = self.get_legal_action()        # 用更新后的属性获取合法动作
 
         # Feature
         # ***更新后的属性在这直接打包成特征
         # 特征
         feature = np.concatenate([
             self.cur_pos_norm,
-            curposx_onehot,
-            curposz_onehot,
-            self.organ_status,
-            self.feature_target_pos,              # baseline以end pos为目标，现在改成target pos
+            self.feature_target_pos,            # baseline以end pos为目标，现在改成target pos
             self.feature_history_pos,
             legal_action,
-            self.treasure_flag,
-            self.end_flag,
+            #self.treasure_flag,
+            #self.end_flag,
             self.obstacle_flag,
-            self.buff_flag
+            #self.buff_flag,
             ])
 
         # 特征、合法动作、奖励函数打包返回。***奖励函数在这被调用
+        potential_field=True
+        normalize=1.41*128
+        if(potential_field==True):
+            cal_dist=np.linalg.norm(np.array(self.last_pos)-np.array(self.target_pos))-np.linalg.norm(np.array(self.cur_pos)-np.array(self.target_pos))
+            target_reward=2*cal_dist/normalize
+            if(targetIsEnd == True):target_reward*=1.5
+            if(self.step_no<10):history_reward=0.3*(self.feature_history_pos[-1])
+            else:history_reward=1.5*(self.feature_history_pos[-1]-2/normalize)
+            if(last_action>7 and cal_dist>=3.0):flash_reward=0.06
+            else:flash_reward=0
+            reward=-0.008+target_reward+history_reward+forbidden_reward+flash_reward
+        else:reward=reward_process(self.feature_target_pos[-1], self.feature_history_pos[-1])
+
         return (
             feature,
             legal_action,
-            reward_process(self.feature_target_pos[-1], self.feature_history_pos[-1]),     # 传入两个距离---奖励函数参数在这可以放心自由发挥
+            reward,     #奖励函数参数在这可以放心自由发挥
         )
 
     def get_legal_action(self):
-        '''
-        return format is like
-        [True, True, ..., False, True, ...]
-        '''
         # if last_action is move and current position is the same as last position, add this action to bad_move_ids
         # 如果上一步的动作是移动，且当前位置与上一步位置相同，则将该动作加入到bad_move_ids中
+        forbidden_reward=0
         if (
             abs(self.cur_pos_norm[0] - self.last_pos_norm[0]) < 0.001
             and abs(self.cur_pos_norm[1] - self.last_pos_norm[1]) < 0.001
             and self.last_action > -1
         ):
             self.bad_move_ids.add(self.last_action)
+            forbidden_reward=-0.5  #给个撞墙惩罚
         else:
             self.bad_move_ids = set()        # 成功移动时重置
 
@@ -221,11 +227,5 @@ class Preprocessor:
             self.bad_move_ids = set()
             return [self.move_usable] * self.move_action_num
 
-        return legal_action
-
-    def get_cur_pos_onehot(self):
-        x = [0] * 64
-        z = [0] * 64
-        x[self.cur_pos[0]] = 1
-        z[self.cur_pos[1]] = 1
-        return(x, z)
+        return legal_action,forbidden_reward
+        #legal_action=[True, True, ..., False, True, ...]

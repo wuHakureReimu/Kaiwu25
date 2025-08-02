@@ -16,6 +16,8 @@ from copy import deepcopy
 from agent_target_dqn.model.model import Model
 from agent_target_dqn.conf.conf import Config
 from agent_target_dqn.feature.definition import ActData
+from torch.cuda.amp.grad_scaler import GradScaler
+from torch.cuda.amp.autocast_mode import autocast
 
 
 class Algorithm:
@@ -40,6 +42,7 @@ class Algorithm:
         )
         self.model.to(self.device)
         self.optim = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        self.scaler = GradScaler()
         self.target_model = deepcopy(self.model)
         self.train_step = 0
         self.predict_count = 0
@@ -71,7 +74,7 @@ class Algorithm:
         batch_feature = self.__convert_to_tensor(batch_feature_vec)
         _batch_feature = self.__convert_to_tensor(_batch_feature_vec)
 
-        # Double DQN 修改点 1: 使用当前网络选择动作
+        # Double DQN: 使用当前网络选择动作
         self.model.eval()
         with torch.no_grad():
             # 使用当前网络计算下一个状态的Q值
@@ -81,7 +84,7 @@ class Algorithm:
             # 选择最大Q值对应的动作
             next_actions = next_q_values.argmax(dim=1, keepdim=True)
 
-        # Double DQN 修改点 2: 使用目标网络评估动作
+        # Double DQN: 使用目标网络评估动作
         model = getattr(self, "target_model")
         model.eval()
         with torch.no_grad():
@@ -93,22 +96,41 @@ class Algorithm:
             q_max = q.gather(1, next_actions).squeeze(1).detach()
 
         # 目标Q值计算
-        target_q = rew + self._gamma * q_max * not_done
+        target_q = (rew + self._gamma * q_max * not_done).detach()
 
         self.optim.zero_grad()
 
+        # -------------------- 混合精度训练修改部分 --------------------
         model = getattr(self, "model")
         model.train()
-        logits = model(batch_feature)
 
-        loss = torch.square(target_q - logits.gather(1, batch_action).view(-1)).mean()
-        loss.backward()
+        # 启用自动混合精度上下文
+        with autocast():
+            logits = model(batch_feature)
+            # 计算Q值预测
+            q_pred = logits.gather(1, batch_action).view(-1)
+            # 确保两个张量形状匹配
+            if target_q.shape != q_pred.shape:
+                target_q = target_q.view_as(q_pred)
+            # 计算MSE损失
+            loss = torch.nn.functional.mse_loss(q_pred, target_q)
+
+        if not isinstance(loss, torch.Tensor):
+            raise ValueError("Loss is not a PyTorch tensor. Check the computation graph.")
+
+        # 使用scaler缩放损失并反向传播
+        self.scaler.scale(loss).backward()
+        # 梯度裁剪
+        self.scaler.unscale_(self.optim)
         model_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        self.optim.step()
+        # 优化器步骤
+        self.scaler.step(self.optim)
+        # 更新缩放器状态
+        self.scaler.update()
+        # ----------------------------------------------------------
 
         self.train_step += 1
 
-        # Update the target network
         # 更新target网络
         if self.train_step % self.target_update_freq == 0:
             self.update_target_q()
@@ -117,7 +139,6 @@ class Algorithm:
         q_value = target_q.mean().detach().item()
         reward = rew.mean().detach().item()
 
-        # Periodically report monitoring
         # 按照间隔上报监控
         now = time.time()
         if now - self.last_report_monitor_time >= 60:
@@ -149,7 +170,7 @@ class Algorithm:
             raise TypeError(f"Unsupported data type: {type(data)}")
         return processed
 
-    def predict_detail(self, list_obs_data, exploit_flag=False):
+    def predict_detail(self, list_obs_data, exploit_flag=False,win_rate=0):
         batch = len(list_obs_data)
 
         feature_vec = [obs_data.feature for obs_data in list_obs_data]
@@ -159,12 +180,15 @@ class Algorithm:
         model = self.model
         model.eval()
 
-        # Exploration factor,
-        # we want epsilon to decrease as the number of prediction steps increases, until it reaches 0.1
-        # 探索因子, 我们希望epsilon随着预测步数越来越小，直到0.1为止
-        self.epsilon = self.epsilon_min + (self.epsilon_max - self.epsilon_min) * np.exp(
-            -self.epsilon_decay * self.predict_count
-        )
+        # 探索因子,我们希望epsilon随着win_rate增大而减小,以保证训练效果
+        MY_epsilon=True   
+        if(MY_epsilon==True):
+            self.epsilon=self.epsilon_max-(self.epsilon_max-self.epsilon_min)*win_rate
+            if(exploit_flag==True and win_rate<=0):   #评估时无法拿到训练时win_rate,使用备用方案
+                self.epsilon=self.epsilon_min
+            exploit_flag=False
+        else:
+            self.epsilon = self.epsilon_min + (self.epsilon_max - self.epsilon_min) * np.exp(-self.epsilon_decay * self.predict_count)
 
         with torch.no_grad():
             # epsilon greedy
