@@ -23,6 +23,8 @@ class Config:
         50,             # history pos (-10) feature
         16,            # legal actions 8 + 8
         49,
+        1,
+        5
     ]
     #蒋的特征
     FEATURE_SPLIT_SHAPE = FEATURES

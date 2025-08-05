@@ -42,6 +42,11 @@ class Preprocessor:
         self.train_map=np.full((128,128),-1,dtype=int)  #train_map方向适应obs方向
         self.critical_point={'end':[],'trea':[],'buff':[]}
 
+        # v19 by Jiang
+        # 为了防止寻路过程中不小心走到终点，我需要设计一个全局特征表征宝箱收集状态，以及终点
+        # 在宝箱收集数量比较低的时候，在离终点比较近的范围内（初步考虑1格）会得到巨额惩罚
+        self.treasure_num = 0      # 这个特征我决定归一化0-1处理，便于训练
+
     def _get_pos_feature(self, found, cur_pos, target_pos):      # 输入AB坐标，生成对应向量AB的特征向量(tool fuction)
         relative_pos = tuple(y - x for x, y in zip(cur_pos, target_pos))  # 对应向量
         dist = np.linalg.norm(relative_pos)                               # L2范数
@@ -108,12 +113,13 @@ class Preprocessor:
                     self.end_pos_dis = end_pos_dis
 
         # 选择目标位置
+        self.treasure_num = 0
         organs = obs['frame_state']['organs']
         end_min_dist_sqr = (self.end_pos[0] - self.cur_pos[0])**2 + (self.end_pos[1] - self.cur_pos[1])**2     
         self.target_pos = self.end_pos
         targetIsEnd = True
         if(self.step_no<=1500): #大于1500步后,直接寻找终点(当max_step改变时需要调整)
-            min_dist_sqr=1000   #可能大于end_min_dist_sqr,但宝箱的优先级较高
+            min_dist_sqr=10000   #可能大于end_min_dist_sqr,但宝箱的优先级较高
             for organ in organs:
                 subtype = organ['sub_type']
                 if organ['status'] == 1 and (subtype == 1 or subtype == 2):    # 若组件可获取且是宝箱或buff，计算L2距离的平方
@@ -122,19 +128,25 @@ class Preprocessor:
                         min_dist_sqr = dist_sqr
                         self.target_pos = (organ['pos']['x'], organ['pos']['z'])
                         targetIsEnd = False
+                
+                # 这里维护已收集宝箱数的特征
+                if organ['status'] == 0 and subtype == 1:
+                    self.treasure_num += 1/8
+        else:
+            self.treasure_num = 1   # 1500步以后视为宝箱全部收集完毕
 
         # 自己看
         self.last_pos_norm = self.cur_pos_norm
         self.cur_pos_norm = norm(self.cur_pos, 128, -128)
-        self.feature_end_pos = self._get_pos_feature(self.is_end_pos_found, self.cur_pos, self.end_pos)     # 有关这部分可以进行修改优化，训练验证能跑后再进行优化
-        # 目标点的特征向量(这里用了个三元操作符，后续验证能跑会修改简洁)
-        self.feature_target_pos = self._get_pos_feature(self.is_end_pos_found if targetIsEnd else 1, self.cur_pos, self.target_pos)
+        # 目标点的特征向量（消融实验发现found特征不重要）
+        self.feature_target_pos = self._get_pos_feature(1, self.cur_pos, self.target_pos)
 
-        # History position feature
-        # 记录前面10步得到一个位移特征向量，从探索的角度来看我们应该鼓励让这个向量dist大一点，可以在这调参优化
+        # v19 by Jiang
+        # 终点特征
+        self.feature_end_pos = self._get_pos_feature(self.is_end_pos_found, self.cur_pos, self.end_pos)
 
-        #self.feature_history_pos = self._get_pos_feature(1, self.cur_pos, self.history_pos[0])  v15
-        #v17
+        # 历史路径特征
+        # v17
         self.feature_history_pos=[]
         self.whole_history_dist=0
         for hpos in self.history_pos:
@@ -190,32 +202,32 @@ class Preprocessor:
             self.feature_history_pos,
             legal_action,
             self.obstacle_flag,
+            self.treasure_num,                  # v19 by Jiang
+            self.feature_end_pos                # v19 by Jiang
             ])
         
-        # 特征、合法动作、奖励函数打包返回。***奖励函数在这被调用
-        potential_field=True
+        # ***奖励函数
         normalize=1.41*128
-        if(potential_field==True):
-            cal_dist=np.linalg.norm(np.array(self.last_pos)-np.array(self.target_pos))-np.linalg.norm(np.array(self.cur_pos)-np.array(self.target_pos))
-            target_reward=2*cal_dist/normalize
-            if(targetIsEnd == True):target_reward*=1.5
-            '''v15
-            if(self.step_no<10):history_reward=0.3*(self.feature_history_pos[-1])
-            else:history_reward=1.5*(self.feature_history_pos[-1]-2/normalize)
-            '''
-            #v17
-            if(self.step_no<10):history_reward=0.2*(self.whole_history_dist)
-            else:history_reward=1.1*(self.whole_history_dist-18/normalize)
-            #v17
-            if(last_action>7 and cal_dist>=3.0):flash_reward=0.06
-            else:flash_reward=0
-            reward=-0.008+target_reward+history_reward+forbidden_reward+flash_reward
-        else:reward=reward_process(self.feature_target_pos[-1], self.feature_history_pos[-1])
+        cal_dist=np.linalg.norm(np.array(self.last_pos)-np.array(self.target_pos))-np.linalg.norm(np.array(self.cur_pos)-np.array(self.target_pos))
+        target_reward=2*cal_dist/normalize
+        if(targetIsEnd == True):target_reward*=1.5
+        #v17
+        if(self.step_no<10):history_reward=0.2*(self.whole_history_dist)
+        else:history_reward=1.1*(self.whole_history_dist-18/normalize)
+        #v17
+        if(last_action>7 and cal_dist>=3.0):flash_reward=0.06
+        else:flash_reward=0
+        # v19 by Jiang
+        end_reward = 0
+        if self.treasure_num <= 6/8:
+            if self.feature_end_pos[-1] < norm(1.41, 1.41*128):
+                end_reward = -1
+        reward = -0.008 + target_reward + history_reward + forbidden_reward + flash_reward + end_reward
 
         return (
             feature,
             legal_action,
-            reward,     #奖励函数参数在这可以放心自由发挥
+            reward,
         )
 
     def get_legal_action(self):
