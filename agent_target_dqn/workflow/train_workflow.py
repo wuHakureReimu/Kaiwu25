@@ -35,10 +35,7 @@ def workflow(envs, agents, logger=None, monitor=None):
         if usr_conf is None:
             logger.error(f"usr_conf is None, please check agent_target_dqn/conf/train_env_conf.toml")
             return
-        #注:中为自己写的
-        #pre_collector = test_collect(2000,env, agent, usr_conf, logger, monitor)
-        #pre_collector = sample_process(pre_collector)
-        #注:中为自己写的
+        
         ordinary_buffer=[]
         ordinary_buffer_size=2000*180
         success_buffer=[]

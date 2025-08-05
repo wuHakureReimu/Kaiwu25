@@ -11,6 +11,7 @@ Author: Tencent AI Arena Authors
 
 import numpy as np
 import math
+import time
 from agent_target_dqn.feature.definition import RelativeDistance, RelativeDirection, DirectionAngles, reward_process
 
 
@@ -18,41 +19,8 @@ def norm(v, max_v, min_v=0):
     v = np.maximum(np.minimum(max_v, v), min_v)
     return (v - min_v) / (max_v - min_v)
 
-# 即时奖励涉及很多状态先后变化，写在大类里不好读，故封装到这
-class ImRewardAttr:
-    def __init__(self):
-        # 1. 宝箱拾取的即时奖励
-        self.last_treasure_collect_num = 0
-        self.treasure_collect_num = 0
 
-        # 2. buff拾取的即时奖励
-        self.last_buff_collect_num = 0
-        self.buff_collect_num = 0
-        self.buff_cnt = 0
-
-        # 3. 闪现的即时奖励
-        self.if_flash = False
-
-    def update(self, obs, last_action):
-        self.last_treasure_collect_num = self.treasure_collect_num
-        self.treasure_collect_num = obs['score_info']['treasure_collected_count']
-        self.if_collect_ts = self.treasure_collect_num - self.last_treasure_collect_num
-
-        self.last_buff_collect_num = self.buff_collect_num
-        self.buff_collect_num = obs['score_info']['buff_count']
-        self.if_collect_buff = self.buff_collect_num - self.last_buff_collect_num
-        if self.if_collect_buff:
-            self.buff_cnt += 1
-        
-        self.if_flash = last_action // 8
-    
-    def get_imReward(self):
-        treasure_reward = 5 * self.if_collect_ts
-        buff_reward = 5 * (0.5 ** self.buff_cnt) * self.if_collect_buff
-        flash_reward = -0.5 * self.if_flash
-        return treasure_reward + buff_reward + flash_reward
-
-
+#蒋的代码
 class Preprocessor:
     def __init__(self) -> None:
         self.move_action_num = 16      # 8方向移动+8方向闪现
@@ -68,18 +36,11 @@ class Preprocessor:
         self.bad_move_ids = set()              # 中间变量，用来判断非法动作
         self.is_flashed = True                 # 闪现状态 True-available
         self.target_pos = (0, 0)               # 目标坐标
-
-        # 视野域信息 ---onehot coding
-        self.treasure_flag = None
-        self.end_flag = None
         self.obstacle_flag = None
-        self.buff_flag = None
-        #中为自己写的
         self.last_pos=(0,0)
-        #中为自己写的
-
-        # 即时奖励属性
-        self.imRewardAttr = ImRewardAttr()
+        #下为v18
+        self.train_map=np.full((128,128),-1,dtype=int)  #train_map方向适应obs方向
+        self.critical_point={'end':[],'trea':[],'buff':[]}
 
     def _get_pos_feature(self, found, cur_pos, target_pos):      # 输入AB坐标，生成对应向量AB的特征向量(tool fuction)
         relative_pos = tuple(y - x for x, y in zip(cur_pos, target_pos))  # 对应向量
@@ -87,7 +48,7 @@ class Preprocessor:
         target_pos_norm = norm(target_pos, 128, -128)                     # B点坐标标准化
         feature = np.array(                                      # ***important---feature structure
             (
-                found,           # if found
+                #found,           # if found
                 norm(relative_pos[0] / max(dist, 1e-4), 1, -1),        # direction
                 norm(relative_pos[1] / max(dist, 1e-4), 1, -1),        # direction
                 target_pos_norm[0],                                    # B点坐标标准化
@@ -109,6 +70,10 @@ class Preprocessor:
         if(len(self.history_pos)>=1):self.last_pos=self.history_pos[-1]
         else:self.last_pos=self.cur_pos
         self.history_pos.append(self.cur_pos)
+        #v17增加
+        while(len(self.history_pos) < 10):
+            self.history_pos.append(self.cur_pos)
+        #v17增加
         if len(self.history_pos) > 10:
             self.history_pos.pop(0)
 
@@ -166,9 +131,18 @@ class Preprocessor:
         self.feature_target_pos = self._get_pos_feature(self.is_end_pos_found if targetIsEnd else 1, self.cur_pos, self.target_pos)
 
         # History position feature
-        # 历史位置特征
         # 记录前面10步得到一个位移特征向量，从探索的角度来看我们应该鼓励让这个向量dist大一点，可以在这调参优化
-        self.feature_history_pos = self._get_pos_feature(1, self.cur_pos, self.history_pos[0])
+
+        #self.feature_history_pos = self._get_pos_feature(1, self.cur_pos, self.history_pos[0])  v15
+        #v17
+        self.feature_history_pos=[]
+        self.whole_history_dist=0
+        for hpos in self.history_pos:
+            one_hpos_feature=self._get_pos_feature(1, self.cur_pos, hpos)
+            self.whole_history_dist+=one_hpos_feature[-1]
+            self.feature_history_pos.append(one_hpos_feature)
+        self.feature_history_pos=np.concatenate(self.feature_history_pos)
+        #v17
 
         self.move_usable = True          # 这个属性放在这初始化应该是为了强制先观测处理，后求合法action
         self.last_action = last_action
@@ -177,33 +151,25 @@ class Preprocessor:
         if hero['talent']['status'] == 0:self.is_flashed = False
         else:self.is_flashed = True
         
-        # 视野域信息维护 + 找到与障碍物最短距离
-        min_obstacle_dist = 6 * 1.41
+        # 视野域信息维护
         map_info = obs['map_info']
-        treasure_map = np.zeros((11, 11), dtype=np.float32)
-        end_map = np.zeros((11, 11), dtype=np.float32)
-        obstacle_map = np.zeros((11, 11), dtype=np.float32)
-        buff_map = np.zeros((11, 11), dtype=np.float32)
-        for r, row_data in enumerate(map_info):
-            for c, value in enumerate(row_data['values']):
-                if value == 0:
-                    obstacle_map[r, c] = 1
-                    tempdist = ((r-5)**2+(c-5)**2)**(1/2)
-                    if tempdist < min_obstacle_dist:
-                        min_obstacle_dist = tempdist
-                elif value == 4: treasure_map[r, c] = 1
-                elif value == 6: buff_map[r, c] = 1
-                elif value == 3: end_map[r, c] = 1
-        self.treasure_flag = treasure_map.flatten()
-        self.end_flag = end_map.flatten()
+        #v18
+        for x in range(11):
+            for z in range(11):
+                if(self.train_map[self.cur_pos[0]-5+x][self.cur_pos[1]-5+z]!=0):  #已经判为0的地方不改
+                    self.train_map[self.cur_pos[0]-5+x][self.cur_pos[1]-5+z]=map_info[x]['values'][z]
+                    if(self.train_map[self.cur_pos[0]-5+x][self.cur_pos[1]-5+z]==2):
+                        self.train_map[self.cur_pos[0]-5+x][self.cur_pos[1]-5+z]=1
+        #v18
+        #v17
+        obstacle_size=7   #调成5,7,9,11  调的同时要改feature
+        obstacle_map = np.zeros((obstacle_size,obstacle_size), dtype=np.float32)
+        start=int((11-obstacle_size)/2)        
+        for r in range(0,obstacle_size):
+            for c in range(0,obstacle_size):
+                if map_info[r+start]['values'][c+start] == 0: obstacle_map[r,c] = 1
         self.obstacle_flag = obstacle_map.flatten()
-        self.buff_flag = buff_map.flatten()
-        # 与障碍物的最短L2距离标准化
-        self.obstacle_dist = norm(min_obstacle_dist, 1.41 * 128)
-
-        # 即时奖励相关属性维护
-        self.imRewardAttr.update(obs, last_action)
-
+        #v17
         return targetIsEnd
 
     def process(self, frame_state, last_action):          # 外层调用
@@ -211,7 +177,9 @@ class Preprocessor:
         
         # Legal action
         # 合法动作
-        legal_action,forbidden_reward = self.get_legal_action()        # 用更新后的属性获取合法动作
+        v18=True
+        if(v18==True):legal_action,forbidden_reward = self.my_train_map_get_legal_action()
+        else:legal_action,forbidden_reward = self.get_legal_action()        # 用更新后的属性获取合法动作
 
         # Feature
         # ***更新后的属性在这直接打包成特征
@@ -221,12 +189,9 @@ class Preprocessor:
             self.feature_target_pos,            # baseline以end pos为目标，现在改成target pos
             self.feature_history_pos,
             legal_action,
-            #self.treasure_flag,
-            #self.end_flag,
             self.obstacle_flag,
-            #self.buff_flag,
             ])
-
+        
         # 特征、合法动作、奖励函数打包返回。***奖励函数在这被调用
         potential_field=True
         normalize=1.41*128
@@ -234,8 +199,14 @@ class Preprocessor:
             cal_dist=np.linalg.norm(np.array(self.last_pos)-np.array(self.target_pos))-np.linalg.norm(np.array(self.cur_pos)-np.array(self.target_pos))
             target_reward=2*cal_dist/normalize
             if(targetIsEnd == True):target_reward*=1.5
+            '''v15
             if(self.step_no<10):history_reward=0.3*(self.feature_history_pos[-1])
             else:history_reward=1.5*(self.feature_history_pos[-1]-2/normalize)
+            '''
+            #v17
+            if(self.step_no<10):history_reward=0.2*(self.whole_history_dist)
+            else:history_reward=1.1*(self.whole_history_dist-18/normalize)
+            #v17
             if(last_action>7 and cal_dist>=3.0):flash_reward=0.06
             else:flash_reward=0
             reward=-0.008+target_reward+history_reward+forbidden_reward+flash_reward
@@ -276,3 +247,130 @@ class Preprocessor:
 
         return legal_action,forbidden_reward
         #legal_action=[True, True, ..., False, True, ...]
+
+    #v18
+    def my_train_map_get_legal_action(self):
+        px,pz=self.cur_pos[0],self.cur_pos[1]
+        k=5
+        for i in range(6,10):   #可以调，注意算力
+            if(px-i<0 or px+i>127 or pz-i<0 or pz+i>127):break
+            else:J=True
+            for j in range(pz-i,pz+i+1):
+                if(self.train_map[px-i][j]==-1 or self.train_map[px+i][j]==-1):
+                    J=False
+                    break
+            for j in range(px-i,px+i+1):
+                if(self.train_map[j][pz-i]==-1 or self.train_map[j][pz+i]==-1):
+                    J=False
+                    break
+            if(J==True):k+=1
+            else:break
+        '''
+        print(px,pz,k)
+        print("处理前:")
+        for i in range(px-k,px+k+1):
+            for j in range(pz-k,pz+k+1):
+                print(self.train_map[i][j],end=' ')
+            print()
+        '''
+        judge=True
+        for i in range(px-k,px):  #x小
+            if(i<=px-k+1):
+                for j in range(pz-k,pz+k+1):
+                    if(self.train_map[i][j]!=0):
+                        judge=False
+                        break
+                if(judge==False):break
+            else:
+                if(self.train_map[i][pz-k]==0 and self.train_map[i][pz+k]==0):
+                    for j in range(pz-k,pz+k+1):
+                        if(self.train_map[i][j]>1):
+                            judge=False
+                            break
+                else:judge=False
+                if(judge==True):
+                    for j in range(pz-k,pz+k+1):
+                        self.train_map[i][j]=0
+                else:break
+
+        judge=True
+        for i in range(px+k,px,-1):  #x大
+            if(i>=px+k-1):
+                for j in range(pz-k,pz+k+1):
+                    if(self.train_map[i][j]!=0):
+                        judge=False
+                        break
+                if(judge==False):break
+            else:
+                if(self.train_map[i][pz-k]==0 and self.train_map[i][pz+k]==0):
+                    for j in range(pz-k,pz+k+1):
+                        if(self.train_map[i][j]>1):
+                            judge=False
+                            break
+                else:judge=False
+                if(judge==True):
+                    for j in range(pz-k,pz+k+1):
+                        self.train_map[i][j]=0
+                else:break
+        
+        judge=True
+        for j in range(pz-k,pz):  #z小
+            if(j<=pz-k+1):
+                for i in range(px-k,px+k+1):
+                    if(self.train_map[i][j]!=0):
+                        judge=False
+                        break
+                if(judge==False):break
+            else:
+                if(self.train_map[px-k][j]==0 and self.train_map[px+k][j]==0):
+                    for i in range(px-k,px+k+1):
+                        if(self.train_map[i][j]>1):
+                            judge=False
+                            break
+                else:judge=False
+                if(judge==True):
+                    for i in range(px-k,px+k+1):
+                        self.train_map[i][j]=0
+                else:break
+        
+        judge=True
+        for j in range(pz+k,pz,-1):  #z大
+            if(j>=pz+k-1):
+                for i in range(px-k,px+k+1):
+                    if(self.train_map[i][j]!=0):
+                        judge=False
+                        break
+                if(judge==False):break
+            else:
+                if(self.train_map[px-k][j]==0 and self.train_map[px+k][j]==0):
+                    for i in range(px-k,px+k+1):
+                        if(self.train_map[i][j]>1):
+                            judge=False
+                            break
+                else:judge=False
+                if(judge==True):
+                    for i in range(px-k,px+k+1):
+                        self.train_map[i][j]=0
+                else:break
+        '''
+        print("处理后:")
+        for i in range(px-k,px+k+1):
+            for j in range(pz-k,pz+k+1):
+                print(self.train_map[i][j],end=' ')
+            print()
+        time.sleep(5)
+        '''
+        
+        legal_action=[True,True,True,True,True,True,True,True,True,True,True,True,True,True,True,True]
+        kx=[1,1,0,-1,-1,-1,0,1]
+        kz=[0,1,1,1,0,-1,-1,-1]
+        for k in range(8):
+            if(self.train_map[px+kx[k]][pz+kz[k]]==0):
+                legal_action[k]=False
+            if(legal_action[k]==False and self.train_map[px+kx[k]*3][pz+kz[k]*3]==0 and self.train_map[px+kx[k]*5][pz+kz[k]*5]==0):
+                legal_action[k+8]=False
+
+        return legal_action,0
+    
+    
+

@@ -19,13 +19,10 @@ class Config:
     #蒋的特征
     FEATURES = [
         2,             # cur pos norm
-        6,             # target pos feature
-        6,             # history pos (-10) feature
+        5,             # target pos feature
+        50,             # history pos (-10) feature
         16,            # legal actions 8 + 8
-        #121,           # 4 map info flags
-        #121,
-        121,
-        #121,
+        49,
     ]
     #蒋的特征
     FEATURE_SPLIT_SHAPE = FEATURES
@@ -55,7 +52,7 @@ class Config:
 
     # Discount factor GAMMA in RL
     # RL中的回报折扣GAMMA
-    GAMMA = 0.985    #0.9
+    GAMMA = 0.99    #0.9
 
     # epsilon
     EPSILON_MIN = 0.15   #0.1
